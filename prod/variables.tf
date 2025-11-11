@@ -46,7 +46,7 @@ variable "tags" {
 variable "cluster_name" {
   description = "Name of the EKS cluster"
   type        = string
-  default     = "prod-dominion-cluster"
+  default     = "prod-cloudsroot-cluster"
 }
 
 variable "rolearn" {
@@ -85,19 +85,19 @@ variable "key_name" {
 variable "domain_name" {
   description = "Primary domain name for certificate issuance"
   type        = string
-  default     = "*.fusisoft.com"
+  default     = "*.cloudsroot.com"
 }
 
 variable "san_domains" {
   description = "SANs (Subject Alternative Names) for SSL certificate"
   type        = list(string)
-  default     = ["*.fusisoft.com"]
+  default     = ["*.cloudsroot.com"]
 }
 
 variable "route53_zone_id" {
   description = "Route 53 hosted zone ID for domain validation"
   type        = string
-  default     = "ZC7WDABJDII2"
+  default     = "Z054736819VMCVEQJK2AT"
 }
 
 ################################################################################
