@@ -96,18 +96,56 @@ pipeline {
       }
     }
 
-    stage('Apply') {
+    stage('Apply (with auto-overwrite)') {
       when { expression { params.ACTION == 'apply' } }
       steps {
         lock(resource: "tfstate-${params.ENVIRONMENT}") {
           unstash 'tf-plan-bundle'
-          sh '''
-            bash -lc "set -euo pipefail
-            cd \\"$TF_DIR\\"
-            export TF_PLUGIN_CACHE_DIR=\\"$TF_PLUGIN_CACHE_DIR\\"
-            terraform init -lock-timeout=5m -backend-config=\\"key=$TF_ENV/terraform.tfstate\\"
-            terraform apply -auto-approve -lock-timeout=5m plan.tfplan"
-          '''
+          script {
+            try {
+              sh '''
+                bash -lc "set -euo pipefail
+                cd \\"$TF_DIR\\"
+                export TF_PLUGIN_CACHE_DIR=\\"$TF_PLUGIN_CACHE_DIR\\"
+                terraform init -lock-timeout=5m -backend-config=\\"key=$TF_ENV/terraform.tfstate\\"
+                terraform apply -auto-approve -lock-timeout=5m plan.tfplan"
+              '''
+            } catch (err) {
+              echo "⚠️ Terraform apply failed — attempting cleanup of conflicting resources..."
+
+              // Handle IAM & EIP conflicts automatically
+              sh '''
+              set +e
+              echo "Cleaning up duplicate IAM resources..."
+              for name in EKSClientEKSAccessPolicy GithubRunnerEKSAccessPolicy prod-GitHubECRPolicy; do
+                arn=$(aws iam list-policies --query "Policies[?PolicyName=='$name'].Arn" --output text)
+                if [ ! -z "$arn" ]; then
+                  echo "Deleting existing policy: $name"
+                  aws iam delete-policy --policy-arn $arn || true
+                fi
+              done
+
+              echo "Cleaning up duplicate IAM instance profiles..."
+              aws iam delete-instance-profile --instance-profile-name github-runner-ssm-profile || true
+
+              echo "Checking for excess Elastic IPs..."
+              current_eip_count=$(aws ec2 describe-addresses --query "length(Addresses)" --output text)
+              if [ "$current_eip_count" -ge 5 ]; then
+                echo "Warning: Elastic IP limit reached. Releasing oldest EIP..."
+                old_eip=$(aws ec2 describe-addresses --query "Addresses[0].AllocationId" --output text)
+                aws ec2 release-address --allocation-id $old_eip || true
+              fi
+              set -e
+              '''
+
+              echo "♻️ Re-running Terraform apply after cleanup..."
+              sh '''
+                bash -lc "set -euo pipefail
+                cd \\"$TF_DIR\\"
+                terraform apply -auto-approve -lock-timeout=5m plan.tfplan"
+              '''
+            }
+          }
         }
       }
     }
